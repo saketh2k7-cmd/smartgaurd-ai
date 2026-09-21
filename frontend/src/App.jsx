@@ -78,7 +78,7 @@ const SEVERITY = {
     label: 'Emergency',
     headline: 'Home status: Emergency',
     blurb: 'Leave the area and follow the recommended action now.',
-    ring: '#FB7185',
+    ring: '#f70b2e',
     text: 'text-rose-300',
     chip: 'border-rose-400/35 bg-rose-400/10 text-rose-300',
     tint: 'bg-rose-400/10 text-rose-300',
