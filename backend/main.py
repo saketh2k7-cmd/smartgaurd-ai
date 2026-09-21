@@ -1,22 +1,11 @@
+import asyncio
+import random
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import joblib
 import pandas as pd
-
-app = FastAPI(
-    title="SmartGuard AI",
-    description="AI-Powered Smart Home Safety System",
-    version="1.0.0"
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Load machine learning model
 model = joblib.load("risk_model.pkl")
@@ -28,21 +17,15 @@ SCORE_MAP = {
     "CRITICAL": 95
 }
 
-class SensorData(BaseModel):
-    temperature: float
-    humidity: float
-    gas_level: int
-    flame_detected: bool
-    motion_detected: bool
-
-# Global variable storing the latest reading pushed by simulate_sensors.py
+# In-memory store initialized with default safe telemetry
 latest_sensor_data = {
+    "status": "success",
     "received_data": {
-        "temperature": 24.0,
+        "temperature": 23.5,
         "humidity": 45.0,
-        "gas_level": 90,
+        "gas_level": 110,
         "flame_detected": False,
-        "motion_detected": False
+        "motion_detected": True
     },
     "evaluation": {
         "risk_score": 20,
@@ -51,45 +34,83 @@ latest_sensor_data = {
     }
 }
 
+# ------------------------------------------------------------------
+# Background Loop Task
+# ------------------------------------------------------------------
+async def auto_simulate_telemetry():
+    global latest_sensor_data
+    while True:
+        await asyncio.sleep(2)  # Generates telemetry every 2 seconds
+        
+        # Simulated sensor telemetry ranges
+        temp = round(random.uniform(20.0, 65.0), 1)
+        humidity = round(random.uniform(20.0, 70.0), 1)
+        gas = random.randint(80, 700)
+        flame = random.random() > 0.88
+        motion = random.choice([True, False])
+
+        # Prepare features for the ML model
+        features = pd.DataFrame([{
+            "temperature": temp,
+            "humidity": humidity,
+            "gas_level": gas,
+            "flame_detected": int(flame),
+            "motion_detected": int(motion)
+        }])
+
+        # Predict risk using loaded model
+        prediction = model.predict(features)[0]
+        risk_score = SCORE_MAP.get(prediction, 20)
+
+        action = (
+            "EVACUATE" if prediction == "CRITICAL" else
+            "SUPPRESS" if prediction == "HIGH" else
+            "VENTILATE" if prediction == "WARNING" else
+            "MONITOR"
+        )
+
+        latest_sensor_data = {
+            "status": "success",
+            "received_data": {
+                "temperature": temp,
+                "humidity": humidity,
+                "gas_level": gas,
+                "flame_detected": flame,
+                "motion_detected": motion
+            },
+            "evaluation": {
+                "risk_score": risk_score,
+                "risk_level": prediction,
+                "recommended_action": action
+            }
+        }
+
+# ------------------------------------------------------------------
+# Lifespan Handler (Triggers loop when FastAPI boots)
+# ------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start background task
+    task = asyncio.create_task(auto_simulate_telemetry())
+    yield
+    # Shutdown: Cancel background task
+    task.cancel()
+
+# Pass lifespan handler into FastAPI
+app = FastAPI(title="SmartGuard AI", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/")
 def home():
     return {"message": "SmartGuard AI Backend is Running 🚀"}
 
-# Endpoint polled by Frontend to view current sensor readings
 @app.get("/sensor-data")
 def get_sensor_data():
-    return latest_sensor_data
-
-# Endpoint posted to by simulate_sensors.py
-@app.post("/sensor-data")
-def receive_sensor_data(data: SensorData):
-    global latest_sensor_data
-    
-    features = pd.DataFrame([{
-        "temperature": data.temperature,
-        "humidity": data.humidity,
-        "gas_level": data.gas_level,
-        "flame_detected": int(data.flame_detected),
-        "motion_detected": int(data.motion_detected)
-    }])
-    
-    prediction = model.predict(features)[0]
-    risk_score = SCORE_MAP.get(prediction, 20)
-
-    action = (
-        "EVACUATE" if prediction == "CRITICAL" else
-        "SUPPRESS" if prediction == "HIGH" else
-        "VENTILATE" if prediction == "WARNING" else
-        "MONITOR"
-    )
-
-    latest_sensor_data = {
-        "status": "success",
-        "received_data": data.dict(),
-        "evaluation": {
-            "risk_score": risk_score,
-            "risk_level": prediction,
-            "recommended_action": action
-        }
-    }
     return latest_sensor_data
