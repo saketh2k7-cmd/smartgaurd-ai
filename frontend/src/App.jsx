@@ -23,7 +23,7 @@ import {
   Clock,
 } from 'lucide-react';
 
-const API_URL = 'http://127.0.0.1:8000/sensor-data';
+const API_URL = 'https://smartgaurd-ai.onrender.com/sensor-data';
 const POLL_MS = 2000;
 const MAX_LOG = 14;
 
